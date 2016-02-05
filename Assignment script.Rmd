@@ -1,0 +1,95 @@
+---
+title: "Assignment"
+output: html_document
+---
+
+
+## Data cleaning and partitioning
+Load required libraries.
+
+```{r message=F}
+library(rmarkdown)
+library(YaleToolkit)
+library(caret)
+library(rpart)
+library(randomForest)
+library(doParallel)
+library(rattle)
+```
+
+Read in training and testing data.
+```{r }
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+Clean the data, remove columns with mostly missing values, remove variables that will not be used.
+```{r}
+testMis <- which(whatis(testing)$missing>0)
+testing <- subset(testing, select=-testMis)
+trainMis <- which(whatis(training)$missing>0)
+training <- subset(training, select=-trainMis)
+training <- training[,c(names(training)[names(training) %in% names(testing)], "classe")]
+# select only measured variables; omit user name, timestamp and window variables.
+training <- training[,-c(1:7)]
+```
+
+Create a validation data set - to be used for out of sample error estimate.
+```{r}
+inTrain <- createDataPartition(training$classe, p=.8, list=F)
+training <- training[inTrain,]
+validation <- training[-inTrain,]
+dim(training); dim(validation)
+```
+
+## Model building
+Build a single tree (for a figure). Also build a random forest model using all variables.
+Fit the model to training set and validation set to get out-of-sample error estimate.
+```{r}
+registerDoParallel(3)
+modTree <- train(classe~., method="rpart", data=training)
+modRF <- train(classe~., method="rf", trainControl=(method="cv"), data=training)
+stopImplicitCluster()
+```
+
+## Out-of-sample error estimate
+Find out out-of-sample error two ways.
+
+First, look at OOB errorrate.
+```{r}
+print(modRF$finalModel)
+```
+OOB error rate is 0.6%, meaning accuracy is 99.4%.
+
+Second, use cross-validation.
+```{r}
+predRF <- predict(modRF, validation)
+confusionMatrix(predRF, validation$classe)
+```
+Accuracy in the validation set is 100%, so out of sample error estimate here is 0%.
+
+
+## Variable importance and graphing
+Further analysis indicated that roll belt was the most important variable in this model. Other variable of high importance were pitch forearm, yaw belt, and pitch belt.
+```{r, echo=FALSE}
+varImpPlot(modRF$finalModel, main="Variable Importance")
+```
+
+Similar information can be seen in an example tree. The first decision point is regarding the roll belt value.
+```{r, echo=F}
+fancyRpartPlot(modTree$finalModel)
+```
+
+## Further evaluation of the model with figures
+For example, the figure below shows two of the variables with highest importance, roll belt (blue circles) and pitch belt (pink circles), plotted against classe (on the x-axis). As the figureindicates, low values of pitch belt combined with high values of roll belt are predictive of classes A, B, and C, whereas in classes D and E low values and of pitch belt and roll belt tend to co-occur.
+```{r, echo=FALSE}
+xyplot(roll_belt + pitch_belt ~ classe, data=training,  auto.key = list(x=.5, y=.9, corner = c(0, 0)),
+       xlab="classe", ylab="roll belt / pitch belt")
+```
+
+On the other hand, the following figure  shows that classes D and E are characterized by low values of pitch belt (pink circles) and high values of pitch forearm, whereas the other classes tend to be more commonly characterized by mid-range values of pitch belt.
+```{r, echo=FALSE}
+xyplot(pitch_forearm + pitch_belt ~ classe, data=training,  auto.key = list(x=.4, y=.9, corner = c(0, 0)),
+       xlab="classe", ylab="pitch forearm / pitch belt")
+```
+
